@@ -1,12 +1,15 @@
+use super::rtx::*;
+use rtx_on_rs::camera::*;
+use rtx_on_rs::config::*;
+
+use ash::extensions::nv::RayTracing;
 use ash::{version::DeviceV1_0, vk, Device};
+use cgmath::{Deg, Matrix4};
 use std::sync::Arc;
 use vulkan::*;
 use winit::{dpi::LogicalSize, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 const MAX_FRAMES_IN_FLIGHT: u32 = 2;
-const VSYNC: bool = true;
-const MSAA: u32 = 1;
-const RESOLUTION: [u32; 2] = [80, 60];
 
 pub struct BaseApp {
     events_loop: EventsLoop,
@@ -20,8 +23,9 @@ pub struct BaseApp {
     render_pass: RenderPass,
     swapchain: Swapchain,
 
-    command_buffers: Vec<vk::CommandBuffer>,
     in_flight_frames: InFlightFrames,
+
+    rtx_data: RTXData,
 }
 
 impl BaseApp {
@@ -66,13 +70,15 @@ impl BaseApp {
             &render_pass,
         );
 
-        let command_buffers = Self::create_and_register_command_buffers(
-            &context,
-            &swapchain,
-            render_pass.get_render_pass(),
-        );
-
         let in_flight_frames = Self::create_sync_objects(context.device());
+
+        let camera = Self::create_camera(swapchain_properties);
+
+        let rt_props =
+            unsafe { RayTracing::get_properties(context.instance(), context.physical_device()) };
+        log::debug!("Ray tracing props: {:#?}", rt_props);
+
+        let rtx_data = RTXData::new(&context, &swapchain, camera);
 
         Self {
             events_loop,
@@ -84,8 +90,8 @@ impl BaseApp {
             swapchain,
             depth_format,
             msaa_samples,
-            command_buffers,
             in_flight_frames,
+            rtx_data,
         }
     }
 
@@ -102,80 +108,6 @@ impl BaseApp {
                 vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
             )
             .expect("Failed to find a supported depth format")
-    }
-
-    fn create_and_register_command_buffers(
-        context: &Context,
-        swapchain: &Swapchain,
-        render_pass: vk::RenderPass,
-    ) -> Vec<vk::CommandBuffer> {
-        let device = context.device();
-
-        let buffers = {
-            let allocate_info = vk::CommandBufferAllocateInfo::builder()
-                .command_pool(context.general_command_pool())
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(swapchain.image_count() as _);
-
-            unsafe { device.allocate_command_buffers(&allocate_info).unwrap() }
-        };
-
-        buffers.iter().enumerate().for_each(|(i, buffer)| {
-            let buffer = *buffer;
-            let framebuffer = swapchain.framebuffers()[i];
-
-            // begin command buffer
-            {
-                let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-                    .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
-                unsafe {
-                    device
-                        .begin_command_buffer(buffer, &command_buffer_begin_info)
-                        .unwrap()
-                };
-            }
-
-            // begin render pass
-            {
-                let clear_values = [
-                    vk::ClearValue {
-                        color: vk::ClearColorValue {
-                            float32: [0.7, 0.7, 0.7, 1.0],
-                        },
-                    },
-                    vk::ClearValue {
-                        depth_stencil: vk::ClearDepthStencilValue {
-                            depth: 1.0,
-                            stencil: 0,
-                        },
-                    },
-                ];
-                let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-                    .render_pass(render_pass)
-                    .framebuffer(framebuffer)
-                    .render_area(vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent: swapchain.properties().extent,
-                    })
-                    .clear_values(&clear_values);
-
-                unsafe {
-                    device.cmd_begin_render_pass(
-                        buffer,
-                        &render_pass_begin_info,
-                        vk::SubpassContents::INLINE,
-                    )
-                };
-            }
-
-            // End render pass
-            unsafe { device.cmd_end_render_pass(buffer) };
-
-            // End command buffer
-            unsafe { device.end_command_buffer(buffer).unwrap() };
-        });
-
-        buffers
     }
 
     fn create_sync_objects(device: &Device) -> InFlightFrames {
@@ -206,6 +138,20 @@ impl BaseApp {
         }
 
         InFlightFrames::new(sync_objects_vec)
+    }
+
+    fn create_camera(swapchain_properties: SwapchainProperties) -> Camera {
+        let view = Matrix4::look_at(
+            [0.0, 0.0, -2.0].into(),
+            [0.0, 0.0, 1.0].into(),
+            [0.0, 1.0, 0.0].into(),
+        );
+
+        let aspect =
+            swapchain_properties.extent.width as f32 / swapchain_properties.extent.height as f32;
+        let projection = math::perspective(Deg(60.0), aspect, 0.1, 10.0);
+
+        Camera::new(view, projection)
     }
 
     pub fn run(&mut self) {
@@ -278,7 +224,7 @@ impl BaseApp {
         // Submit command buffer
         {
             let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-            let command_buffers = [self.command_buffers[image_index as usize]];
+            let command_buffers = [self.rtx_data.get_command_buffer(image_index as _)];
             let submit_info = vk::SubmitInfo::builder()
                 .wait_semaphores(&wait_semaphores)
                 .wait_dst_stage_mask(&wait_stages)
@@ -373,16 +319,14 @@ impl BaseApp {
             &render_pass,
         );
 
-        let command_buffers = Self::create_and_register_command_buffers(
-            &self.context,
-            &swapchain,
-            render_pass.get_render_pass(),
-        );
+        let camera = Self::create_camera(swapchain_properties);
+
+        let rtx_data = RTXData::new(&self.context, &swapchain, camera);
 
         self.swapchain = swapchain;
         self.swapchain_properties = swapchain_properties;
         self.render_pass = render_pass;
-        self.command_buffers = command_buffers;
+        self.rtx_data = rtx_data;
     }
 
     fn has_window_been_minimized(&self) -> bool {
@@ -401,10 +345,6 @@ impl BaseApp {
 
     /// Clean up the swapchain and all resources that depends on it.
     fn cleanup_swapchain(&mut self) {
-        let device = self.context.device();
-        unsafe {
-            device.free_command_buffers(self.context.general_command_pool(), &self.command_buffers);
-        }
         self.swapchain.destroy();
     }
 }

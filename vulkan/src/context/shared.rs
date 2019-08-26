@@ -3,6 +3,7 @@ use ash::{
     extensions::{
         ext::DebugReport,
         khr::{Surface, Swapchain as SwapchainLoader},
+        nv::RayTracing,
     },
     version::{DeviceV1_0, EntryV1_0, InstanceV1_0},
     vk, Device, Entry, Instance,
@@ -23,6 +24,7 @@ pub struct SharedContext {
     surface_khr: vk::SurfaceKHR,
     physical_device: vk::PhysicalDevice,
     device: Device,
+    ray_tracing: RayTracing,
     pub queue_families_indices: QueueFamiliesIndices,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
@@ -49,6 +51,8 @@ impl SharedContext {
             queue_families_indices,
         );
 
+        let ray_tracing = RayTracing::new(&instance, &device);
+
         Self {
             _entry: entry,
             instance,
@@ -57,6 +61,7 @@ impl SharedContext {
             surface_khr,
             physical_device,
             device,
+            ray_tracing,
             queue_families_indices,
             graphics_queue,
             present_queue,
@@ -179,8 +184,8 @@ fn check_device_extension_support(instance: &Instance, device: vk::PhysicalDevic
     true
 }
 
-fn get_required_device_extensions() -> [&'static CStr; 1] {
-    [SwapchainLoader::name()]
+fn get_required_device_extensions() -> [&'static CStr; 2] {
+    [SwapchainLoader::name(), RayTracing::name()]
 }
 
 /// Find a queue family with at least one graphics queue and one with
@@ -202,7 +207,10 @@ fn find_queue_families(
     for (index, family) in props.iter().filter(|f| f.queue_count > 0).enumerate() {
         let index = index as u32;
 
-        if family.queue_flags.contains(vk::QueueFlags::GRAPHICS) && graphics.is_none() {
+        if family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+            && family.queue_flags.contains(vk::QueueFlags::COMPUTE)
+            && graphics.is_none()
+        {
             graphics = Some(index);
         }
 
@@ -306,6 +314,10 @@ impl SharedContext {
 
     pub fn device(&self) -> &Device {
         &self.device
+    }
+
+    pub fn ray_tracing(&self) -> &RayTracing {
+        &self.ray_tracing
     }
 
     pub fn queue_families_indices(&self) -> QueueFamiliesIndices {

@@ -1,2 +1,2 @@
 [workspace]
-members = ["rtx-on-rs", "vulkan", "math"]
+members = ["rtx-on-rs", "raytracing", "vulkan", "math"]

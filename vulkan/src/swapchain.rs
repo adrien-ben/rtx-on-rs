@@ -1,4 +1,8 @@
-use super::{context::Context, image::create_image_view, renderpass::RenderPass};
+use super::{
+    context::Context,
+    image::{create_image_view, Image},
+    renderpass::RenderPass,
+};
 use ash::{
     extensions::khr::{Surface, Swapchain as SwapchainLoader},
     prelude::VkResult,
@@ -12,7 +16,7 @@ pub struct Swapchain {
     swapchain: SwapchainLoader,
     swapchain_khr: vk::SwapchainKHR,
     properties: SwapchainProperties,
-    images: Vec<vk::Image>,
+    images: Vec<Image>,
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
 }
@@ -61,7 +65,9 @@ impl Swapchain {
                 .image_color_space(format.color_space)
                 .image_extent(extent)
                 .image_array_layers(1)
-                .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT);
+                .image_usage(
+                    vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST,
+                );
 
             builder = if graphics != present {
                 builder
@@ -88,6 +94,11 @@ impl Swapchain {
             swapchain
                 .get_swapchain_images(swapchain_khr)
                 .expect("Failed to get swapchain images")
+                .iter()
+                .map(|image| {
+                    Image::create_swapchain_image(Arc::clone(&context), *image, properties)
+                })
+                .collect::<Vec<_>>()
         };
         let views = Self::create_views(context.device(), &images, properties);
 
@@ -107,7 +118,7 @@ impl Swapchain {
     /// Create one image view for each image of the swapchain.
     fn create_views(
         device: &Device,
-        swapchain_images: &[vk::Image],
+        swapchain_images: &[Image],
         swapchain_properties: SwapchainProperties,
     ) -> Vec<vk::ImageView> {
         swapchain_images
@@ -115,7 +126,7 @@ impl Swapchain {
             .map(|image| {
                 create_image_view(
                     device,
-                    *image,
+                    image.image,
                     vk::ImageViewType::TYPE_2D,
                     1,
                     1,
@@ -131,7 +142,7 @@ impl Swapchain {
         swapchain: SwapchainLoader,
         swapchain_khr: vk::SwapchainKHR,
         properties: SwapchainProperties,
-        images: Vec<vk::Image>,
+        images: Vec<Image>,
         image_views: Vec<vk::ImageView>,
         framebuffers: Vec<vk::Framebuffer>,
     ) -> Self {
@@ -162,6 +173,10 @@ impl Swapchain {
 
     pub fn image_count(&self) -> usize {
         self.images.len()
+    }
+
+    pub fn images(&self) -> &[Image] {
+        &self.images
     }
 }
 

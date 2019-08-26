@@ -1,5 +1,5 @@
 [package]
-name = "rtx-on-rs"
+name = "raytracing"
 version = "0.1.0"
 authors = ["Adrien Bennadji <adrien.bennadji@live.fr>"]
 edition = "2018"
@@ -8,11 +8,6 @@ edition = "2018"
 
 [dependencies]
 vulkan = {path = "../vulkan"}
-raytracing = {path = "../raytracing"}
-math = {path = "../math"}
-
 log = "0.4"
 env_logger = "0.6"
 ash = "0.29.0"
-winit = "0.19.2"
-cgmath = "0.17"

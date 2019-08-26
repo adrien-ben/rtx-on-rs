@@ -1,4 +1,4 @@
-use super::{buffer::*, context::*};
+use super::{buffer::*, context::*, swapchain::SwapchainProperties};
 use ash::{
     version::{DeviceV1_0, InstanceV1_0},
     vk, Device,
@@ -40,39 +40,47 @@ impl Default for ImageParameters {
 pub struct Image {
     context: Arc<Context>,
     pub image: vk::Image,
-    pub memory: vk::DeviceMemory,
+    memory: Option<vk::DeviceMemory>,
+    extent: vk::Extent3D,
     format: vk::Format,
     mip_levels: u32,
     layers: u32,
+    managed: bool,
 }
 
 impl Image {
     fn new(
         context: Arc<Context>,
         image: vk::Image,
-        memory: vk::DeviceMemory,
+        memory: Option<vk::DeviceMemory>,
+        extent: vk::Extent3D,
         format: vk::Format,
         mip_levels: u32,
         layers: u32,
+        managed: bool,
     ) -> Self {
         Self {
             context,
             image,
             memory,
+            extent,
             format,
             mip_levels,
             layers,
+            managed,
         }
     }
 
     pub fn create(context: Arc<Context>, parameters: ImageParameters) -> Self {
+        let extent = vk::Extent3D {
+            width: parameters.extent.width,
+            height: parameters.extent.height,
+            depth: 1,
+        };
+
         let image_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
-            .extent(vk::Extent3D {
-                width: parameters.extent.width,
-                height: parameters.extent.height,
-                depth: 1,
-            })
+            .extent(extent)
             .mip_levels(parameters.mip_levels)
             .array_layers(parameters.layers)
             .format(parameters.format)
@@ -112,10 +120,33 @@ impl Image {
         Image::new(
             context,
             image,
-            memory,
+            Some(memory),
+            extent,
             parameters.format,
             parameters.mip_levels,
             parameters.layers,
+            false,
+        )
+    }
+
+    pub fn create_swapchain_image(
+        context: Arc<Context>,
+        image: vk::Image,
+        swapchain_properties: SwapchainProperties,
+    ) -> Self {
+        Self::new(
+            context,
+            image,
+            None,
+            vk::Extent3D {
+                width: swapchain_properties.extent.width,
+                height: swapchain_properties.extent.height,
+                depth: 1,
+            },
+            swapchain_properties.format.format,
+            1,
+            1,
+            true,
         )
     }
 }
@@ -204,9 +235,11 @@ impl Image {
                     vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                     vk::PipelineStageFlags::TRANSFER,
                 ),
-                _ => panic!(
-                    "Unsupported layout transition({:?} => {:?}).",
-                    old_layout, new_layout
+                _ => (
+                    vk::AccessFlags::empty(),
+                    vk::AccessFlags::empty(),
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
                 ),
             };
 
@@ -290,6 +323,38 @@ impl Image {
                 &regions,
             )
         }
+    }
+
+    /// Record command to copy [src_image] into this image.
+    ///
+    /// The full extent of the passed in layer will be copied, so the target image
+    /// should be big enough to contain the content of the source image.
+    ///
+    /// Source image layout should be TRANSFER_SRC_OPTIMAL and target TRANSFER_DST_OPTIMAL.
+    pub fn cmd_copy(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        src_image: &Image,
+        subresource_layers: vk::ImageSubresourceLayers,
+    ) {
+        let image_copy_info = [vk::ImageCopy::builder()
+            .src_subresource(subresource_layers)
+            .src_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
+            .dst_subresource(subresource_layers)
+            .dst_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
+            .extent(src_image.extent)
+            .build()];
+
+        unsafe {
+            self.context.device().cmd_copy_image(
+                command_buffer,
+                src_image.image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                self.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &image_copy_info,
+            );
+        };
     }
 
     pub fn generate_mipmaps(&self, extent: vk::Extent2D) {
@@ -465,8 +530,12 @@ impl Image {
 impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
-            self.context.device().destroy_image(self.image, None);
-            self.context.device().free_memory(self.memory, None);
+            if !self.managed {
+                self.context.device().destroy_image(self.image, None);
+            }
+            if let Some(memory) = self.memory {
+                self.context.device().free_memory(memory, None);
+            }
         }
     }
 }

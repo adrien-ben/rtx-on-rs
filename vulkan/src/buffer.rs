@@ -171,18 +171,8 @@ pub fn cmd_create_device_local_buffer_with_data<A, T: Copy>(
     data: &[T],
 ) -> (Buffer, Buffer) {
     let size = (data.len() * size_of::<T>()) as vk::DeviceSize;
-    let mut staging_buffer = Buffer::create(
-        Arc::clone(context),
-        size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-    );
-
-    unsafe {
-        let data_ptr = staging_buffer.map_memory();
-        mem_copy(data_ptr, data);
-    };
-
+    let staging_buffer =
+        create_host_visible_buffer(context, vk::BufferUsageFlags::TRANSFER_SRC, data);
     let buffer = Buffer::create(
         Arc::clone(context),
         size,
@@ -193,4 +183,25 @@ pub fn cmd_create_device_local_buffer_with_data<A, T: Copy>(
     buffer.cmd_copy(command_buffer, &staging_buffer, staging_buffer.size);
 
     (buffer, staging_buffer)
+}
+
+pub fn create_host_visible_buffer<T: Copy>(
+    context: &Arc<Context>,
+    usage: vk::BufferUsageFlags,
+    data: &[T],
+) -> Buffer {
+    let size = (data.len() * size_of::<T>()) as vk::DeviceSize;
+    let mut buffer = Buffer::create(
+        Arc::clone(context),
+        size,
+        usage,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    );
+
+    unsafe {
+        let data_ptr = buffer.map_memory();
+        mem_copy(data_ptr, data);
+    };
+
+    buffer
 }

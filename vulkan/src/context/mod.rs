@@ -1,7 +1,11 @@
 mod shared;
 
 use self::shared::*;
-use ash::{extensions::khr::Surface, version::DeviceV1_0, vk, Device, Instance};
+use ash::{
+    extensions::{khr::Surface, nv::RayTracing},
+    version::DeviceV1_0,
+    vk, Device, Instance,
+};
 use std::sync::Arc;
 use winit::Window;
 
@@ -88,6 +92,10 @@ impl Context {
 
     pub fn device(&self) -> &Device {
         self.shared_context.device()
+    }
+
+    pub fn ray_tracing(&self) -> &RayTracing {
+        self.shared_context.ray_tracing()
     }
 
     pub fn queue_families_indices(&self) -> QueueFamiliesIndices {

@@ -780,6 +780,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "raytracing"
+version = "0.1.0"
+dependencies = [
+ "ash 0.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "env_logger 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkan 0.1.0",
+]
+
+[[package]]
 name = "rdrand"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -813,9 +823,11 @@ name = "rtx-on-rs"
 version = "0.1.0"
 dependencies = [
  "ash 0.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cgmath 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "math 0.1.0",
+ "raytracing 0.1.0",
  "vulkan 0.1.0",
  "winit 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
