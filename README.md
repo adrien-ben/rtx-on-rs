@@ -5,7 +5,7 @@ Vulkan and RTX samples written in Rust using [Ash][2].
 ## Samples
 
 - [x] Triangle
-- [ ] Shadows
+- [x] Shadows
 - [ ] Reflections
 - [ ] Refractions
 - [ ] Global illumination
@@ -18,7 +18,7 @@ Vulkan and RTX samples written in Rust using [Ash][2].
 ./compile_shaders.sh
 
 # Run app
-RUST_LOG=rtx_on_rs=debug,vulkan=warn cargo run
+RUST_LOG=rtx_on_rs=debug,vulkan=warn cargo run --bin <sample_name>
 ```
 
 ## Tested on

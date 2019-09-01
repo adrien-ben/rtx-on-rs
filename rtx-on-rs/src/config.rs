@@ -8,7 +8,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            resolution: [800, 600],
+            resolution: [1920, 1080],
             msaa: 1,
             vsync: true,
         }
