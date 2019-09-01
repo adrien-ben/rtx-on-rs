@@ -1,10 +1,7 @@
-use super::rtx::*;
-use rtx_on_rs::camera::*;
-use rtx_on_rs::config::*;
+use super::config::*;
 
 use ash::extensions::nv::RayTracing;
 use ash::{version::DeviceV1_0, vk, Device};
-use cgmath::{Deg, Matrix4};
 use std::sync::Arc;
 use vulkan::*;
 use winit::{dpi::LogicalSize, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
@@ -12,6 +9,8 @@ use winit::{dpi::LogicalSize, Event, EventsLoop, Window, WindowBuilder, WindowEv
 const MAX_FRAMES_IN_FLIGHT: u32 = 2;
 
 pub struct BaseApp {
+    config: Config,
+
     events_loop: EventsLoop,
     _window: Window,
     resize_dimensions: Option<[u32; 2]>,
@@ -24,20 +23,18 @@ pub struct BaseApp {
     swapchain: Swapchain,
 
     in_flight_frames: InFlightFrames,
-
-    rtx_data: RTXData,
 }
 
 impl BaseApp {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         log::info!("Creating application.");
 
         let events_loop = EventsLoop::new();
         let window = WindowBuilder::new()
             .with_title("RTX On rs")
             .with_dimensions(LogicalSize::new(
-                f64::from(RESOLUTION[0]),
-                f64::from(RESOLUTION[1]),
+                f64::from(config.resolution[0]),
+                f64::from(config.resolution[1]),
             ))
             .build(&events_loop)
             .unwrap();
@@ -49,10 +46,10 @@ impl BaseApp {
             context.surface(),
             context.surface_khr(),
         );
-        let swapchain_properties =
-            swapchain_support_details.get_ideal_swapchain_properties(RESOLUTION, VSYNC);
+        let swapchain_properties = swapchain_support_details
+            .get_ideal_swapchain_properties(config.resolution, config.vsync);
         let depth_format = Self::find_depth_format(&context);
-        let msaa_samples = context.get_max_usable_sample_count(MSAA);
+        let msaa_samples = context.get_max_usable_sample_count(config.msaa);
 
         let render_pass = RenderPass::create(
             Arc::clone(&context),
@@ -65,22 +62,19 @@ impl BaseApp {
         let swapchain = Swapchain::create(
             Arc::clone(&context),
             swapchain_support_details,
-            RESOLUTION,
-            VSYNC,
+            config.resolution,
+            config.vsync,
             &render_pass,
         );
 
         let in_flight_frames = Self::create_sync_objects(context.device());
 
-        let camera = Self::create_camera(swapchain_properties);
-
         let rt_props =
             unsafe { RayTracing::get_properties(context.instance(), context.physical_device()) };
         log::debug!("Ray tracing props: {:#?}", rt_props);
 
-        let rtx_data = RTXData::new(&context, &swapchain, camera);
-
         Self {
+            config,
             events_loop,
             _window: window,
             resize_dimensions: None,
@@ -91,7 +85,6 @@ impl BaseApp {
             depth_format,
             msaa_samples,
             in_flight_frames,
-            rtx_data,
         }
     }
 
@@ -140,35 +133,17 @@ impl BaseApp {
         InFlightFrames::new(sync_objects_vec)
     }
 
-    fn create_camera(swapchain_properties: SwapchainProperties) -> Camera {
-        let view = Matrix4::look_at(
-            [0.0, 0.0, -2.0].into(),
-            [0.0, 0.0, 1.0].into(),
-            [0.0, 1.0, 0.0].into(),
-        );
-
-        let aspect =
-            swapchain_properties.extent.width as f32 / swapchain_properties.extent.height as f32;
-        let projection = math::perspective(Deg(60.0), aspect, 0.1, 10.0);
-
-        Camera::new(view, projection)
+    pub fn prepare_run(&self) {
+        log::info!("Running application.");
     }
 
-    pub fn run(&mut self) {
-        log::info!("Running application.");
-        loop {
-            if self.process_event() {
-                break;
-            }
-
-            self.draw_frame();
-        }
+    pub fn finish_run(&self) {
         unsafe { self.context.device().device_wait_idle().unwrap() };
     }
 
     /// Process the events from the `EventsLoop` and return whether the
     /// main loop should stop.
-    fn process_event(&mut self) -> bool {
+    pub fn process_event(&mut self) -> bool {
         let mut should_stop = false;
         let mut resize_dimensions = None;
 
@@ -188,7 +163,10 @@ impl BaseApp {
         should_stop
     }
 
-    fn draw_frame(&mut self) {
+    pub fn draw_frame(
+        &mut self,
+        command_buffers: &[vk::CommandBuffer],
+    ) -> Option<SwapchainProperties> {
         log::trace!("Drawing frame.");
         let sync_objects = self.in_flight_frames.next().unwrap();
         let image_available_semaphore = sync_objects.image_available_semaphore;
@@ -210,7 +188,7 @@ impl BaseApp {
             Ok((image_index, _)) => image_index,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 self.recreate_swapchain();
-                return;
+                return Some(self.swapchain_properties);
             }
             Err(error) => panic!("Error while acquiring next image. Cause: {}", error),
         };
@@ -224,7 +202,7 @@ impl BaseApp {
         // Submit command buffer
         {
             let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-            let command_buffers = [self.rtx_data.get_command_buffer(image_index as _)];
+            let command_buffers = [command_buffers[image_index as usize]];
             let submit_info = vk::SubmitInfo::builder()
                 .wait_semaphores(&wait_semaphores)
                 .wait_dst_stage_mask(&wait_stages)
@@ -265,7 +243,9 @@ impl BaseApp {
 
             if self.resize_dimensions.is_some() {
                 self.recreate_swapchain();
+                return Some(self.swapchain_properties);
             }
+            None
         }
     }
 
@@ -301,7 +281,7 @@ impl BaseApp {
             self.context.surface_khr(),
         );
         let swapchain_properties =
-            swapchain_support_details.get_ideal_swapchain_properties(dimensions, VSYNC);
+            swapchain_support_details.get_ideal_swapchain_properties(dimensions, self.config.vsync);
 
         let render_pass = RenderPass::create(
             Arc::clone(&self.context),
@@ -315,18 +295,13 @@ impl BaseApp {
             Arc::clone(&self.context),
             swapchain_support_details,
             dimensions,
-            VSYNC,
+            self.config.vsync,
             &render_pass,
         );
-
-        let camera = Self::create_camera(swapchain_properties);
-
-        let rtx_data = RTXData::new(&self.context, &swapchain, camera);
 
         self.swapchain = swapchain;
         self.swapchain_properties = swapchain_properties;
         self.render_pass = render_pass;
-        self.rtx_data = rtx_data;
     }
 
     fn has_window_been_minimized(&self) -> bool {
@@ -346,6 +321,16 @@ impl BaseApp {
     /// Clean up the swapchain and all resources that depends on it.
     fn cleanup_swapchain(&mut self) {
         self.swapchain.destroy();
+    }
+}
+
+impl BaseApp {
+    pub fn context(&self) -> &Arc<Context> {
+        &self.context
+    }
+
+    pub fn swapchain(&self) -> &Swapchain {
+        &self.swapchain
     }
 }
 
