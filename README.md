@@ -1,3 +1,5 @@
+** ARCHIVED: See https://github.com/adrien-ben/vulkan-raytracing-rs which uses official Khronos extensions**
+
 # RTX-On with Rust
 
 Vulkan and RTX samples written in Rust using [Ash][2].
